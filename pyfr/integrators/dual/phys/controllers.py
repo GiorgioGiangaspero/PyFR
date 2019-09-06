@@ -67,37 +67,59 @@ class DualSkoptController(BaseDualController):
                 self.pseudointegrator.pseudo_advance(self.tcurr)
                 self._accept_step(self.pseudointegrator._idxcurr)
             else:
+                # after the specified time run the optimisation
+                print('Starting the optimisationi...')
                 self.run_optimisation()
 
+                import sys
+                sys.exit('Optimisation concluded!')
+
     def run_optimisation(self):
-        #TODO store the current solution, and set the idxold
-        #     we are going to use self.idxold to reject to step
-        #     and go back the previous solution
-        # is there actually any need for this? do no think so
-
-        #Set up the optimisation problem
-
-        #from skopt.space import Integer
-        ##from skopt.utils import use_named_args
-        #from skopt.plots import plot_convergence, plot_evaluations, plot_objective
-        #from skopt import gp_minimize, forest_minimize
+        from skopt.space import Integer
+        #from skopt.utils import use_named_args
+        from skopt.plots import plot_convergence, plot_evaluations, plot_objective
+        from skopt import gp_minimize, forest_minimize
 
         # get the number of levels and initial settings
         # from the cycle information
+        cycle, csteps = self.pseudointegrator.cycle, self.pseudointegrator.csteps
+
+        #initial guess
+        x0 = csteps
+
         # set the optimisation space
+        space  = [Integer(0, 4, name='level-{}'.format(i)) for i in range(len(csteps))]
 
         # run it!
+        use_GP = False
+        max_iter = 500
 
-        #test, just see if it still works
-        print('inside run_optimisation')
-        self.pseudointegrator.pseudo_advance(self.tcurr)
-        self._reject_step()
-        print('rejected step and restarting')
+        if use_GP:
+            res = gp_minimize(self.objective_function, space, n_calls=max_iter,
+                              random_state=123, verbose=False, x0=x0)
+        else:
+            res = forest_minimize(self.objective_function, space, n_calls=max_iter,
+                                  random_state=123, verbose=False, x0=x0)
+
+        print('minimum cputime = {}'.format(res.fun))
+        print('optimal cycle   = {}'.format(res.x))
+
+        #plot_convergence(res)
+        #plot_evaluations(res)
+        #plot_objective(res)
+
+        return res
 
     def objective_function(self, x):
         import time
-        #get the inputs from x
+
+        #print('Evaluating one objective function')
+
         #change the pMG properties according to x
+        self.pseudointegrator.csteps = x
+
+        # verify the change
+        print('csteps_opt_cal = {}'.format(self.pseudointegrator.csteps))
 
         #get the starting cpu time
         CPU_time = time.time()
@@ -114,5 +136,7 @@ class DualSkoptController(BaseDualController):
         # then reject the step to make sure we are restarting
         # every time from the same solution.
         self._reject_step()
+
+        print('CPU_time = {}'.format(CPU_time))
         return CPU_time
         
