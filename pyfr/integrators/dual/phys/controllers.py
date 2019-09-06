@@ -41,23 +41,21 @@ class DualNoneController(BaseDualController):
             self._accept_step(self.pseudointegrator._idxcurr)
 
 
-class DualOptController(BaseDualController):
+class DualSkoptController(BaseDualController):
     controller_name = 'skopt'
 
     def _reject_step(self, err=None):
-        #TODO is this correct?
         self.nacptchain = 0
         self.nrjctsteps += 1
-        self.stepinfo.append((dt, 'reject', err))
 
         # Rotate the stepper registers to the left such that at the next call
         # we will have the same physical solutions as for the previous call
-        psnregs = self.pseudointegrator._pseudo_stepper_nregs
-        snregs = self.pseudointegrator._stepper_nregs
+        psnregs = self.pseudointegrator.pintg._pseudo_stepper_nregs
+        snregs = self.pseudointegrator.pintg._stepper_nregs
 
-        self.pseudointegrator._regidx[psnregs:psnregs + snregs] = (
-            self.pintg._stepper_regidx[1:] +
-            [self.pintg._stepper_regidx[0]]
+        self.pseudointegrator.pintg._regidx[psnregs:psnregs + snregs] = (
+            self.pseudointegrator.pintg._stepper_regidx[1:] +
+            [self.pseudointegrator.pintg._stepper_regidx[0]]
         )
 
     def advance_to(self, t):
@@ -65,7 +63,7 @@ class DualOptController(BaseDualController):
             raise ValueError('Advance time is in the past')
 
         while self.tcurr < t:
-            if self.tcurr < 30.0:
+            if self.tcurr < 10.0:
                 self.pseudointegrator.pseudo_advance(self.tcurr)
                 self._accept_step(self.pseudointegrator._idxcurr)
             else:
@@ -75,7 +73,7 @@ class DualOptController(BaseDualController):
         #TODO store the current solution, and set the idxold
         #     we are going to use self.idxold to reject to step
         #     and go back the previous solution
-        # is there actually any need for this
+        # is there actually any need for this? do no think so
 
         #Set up the optimisation problem
 
@@ -91,8 +89,10 @@ class DualOptController(BaseDualController):
         # run it!
 
         #test, just see if it still works
+        print('inside run_optimisation')
         self.pseudointegrator.pseudo_advance(self.tcurr)
         self._reject_step()
+        print('rejected step and restarting')
 
     def objective_function(self, x):
         import time
