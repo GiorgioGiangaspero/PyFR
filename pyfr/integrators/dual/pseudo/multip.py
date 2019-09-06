@@ -283,6 +283,7 @@ class DualMultiPIntegrator(BaseDualPseudoIntegrator):
 
         self.tcurr = tcurr
 
+        conv = False
         for i in range(self._maxniters):
             for l, m, n in it.zip_longest(cycle, cycle[1:], csteps):
                 self.level = l
@@ -299,7 +300,10 @@ class DualMultiPIntegrator(BaseDualPseudoIntegrator):
 
             # Convergence monitoring
             if self.mg_convmon(self.pintg, i, self._minniters):
+                conv = True
                 break
 
         # Update the dual-time stepping banks
         self.finalise_mg_advance(self.pintg._idxcurr)
+
+        return conv
