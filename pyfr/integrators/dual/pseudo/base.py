@@ -39,10 +39,6 @@ class BaseDualPseudoIntegrator(BaseCommon):
         # Amount of temp storage required by physical stepper
         self._stepper_nregs = len(stepper_coeffs) - 1
 
-        # add 1 register for the pysical stepper if the controller is skopt?
-        if cfg.get(sect, 'controller', 'none') == 'skopt':
-            self._stepper_nregs += 1
-
         # Determine the amount of temp storage required in total
         self.nregs = (self._pseudo_stepper_nregs + self._stepper_nregs +
                       self.aux_nregs)

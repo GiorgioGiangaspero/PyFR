@@ -145,7 +145,7 @@ class DualRK4PseudoStepper(BaseDualPseudoStepper):
 
     @property
     def _pseudo_stepper_nregs(self):
-        return 3
+        return 5
 
     @property
     def _pseudo_stepper_order(self):
@@ -158,7 +158,7 @@ class DualRK4PseudoStepper(BaseDualPseudoStepper):
 
         # Get the bank indices for pseudo-registers (n+1,m; n+1,m+1; rhs),
         # where m = pseudo-time and n = real-time
-        r0, r1, r2 = self._pseudo_stepper_regidx
+        r0, r1, r2, r3, r4 = self._pseudo_stepper_regidx
 
         # Ensure r0 references the bank containing u(n+1,m)
         if r0 != self._idxcurr:
@@ -257,7 +257,7 @@ class DualRKVdH2RPseudoStepper(DualEmbeddedPairPseudoStepper):
 
     @property
     def _pseudo_stepper_nregs(self):
-        return 4 if self._pseudo_stepper_has_lerrest else 3
+        return 6 if self._pseudo_stepper_has_lerrest else 5
 
     def step(self, t):
         add, rhs = self._add, self._rhs_with_dts
@@ -266,9 +266,9 @@ class DualRKVdH2RPseudoStepper(DualEmbeddedPairPseudoStepper):
         rold = self._idxcurr
 
         if errest:
-            r2, r1, rerr = set(self._pseudo_stepper_regidx) - {rold}
+            r2, r1, rerr, r3, r4 = set(self._pseudo_stepper_regidx) - {rold}
         else:
-            r2, r1 = set(self._pseudo_stepper_regidx) - {rold}
+            r2, r1, r3, r4 = set(self._pseudo_stepper_regidx) - {rold}
 
         # Copy the current solution
         add(0.0, r1, 1.0, rold)
