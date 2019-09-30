@@ -337,3 +337,127 @@ class DualRK45PseudoStepper(DualRKVdH2RPseudoStepper):
     @property
     def _pseudo_stepper_order(self):
         return 4
+
+class DualPseudoRK1011Stepper(DualEmbeddedPairPseudoStepper):
+    pseudo_stepper_name = 'rk1011'
+    bhat = [0.393532508039953, 0.103698834129218, 1.762063014496891, -7.975545473944710, 17.369144216329801, -23.392811504681202, 20.502287838369053, -11.411634409951532, 3.649264977212526, 0.0]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @property
+    def _pseudo_stepper_nregs(self):
+        return 5
+
+    @property
+    def _pseudo_stepper_order(self):
+        return 1
+
+    def step(self, t):
+        add = self._add
+        rhs = self._rhs_with_dts
+        errest = self._pseudo_stepper_has_lerrest
+
+        Adiag = np.array([0, 1.0/9.0, 0.032204258058884271953559164103353, 0.052242410573493235081965480048893,
+                          0.076088154842620117634943710527295, 0.10518779980582534938626793064032, 0.14190034937115256208350899669313,
+                          0.19033481524088430303365271356597, 0.25842115960389150375320355124131, 0.36419395849639307760625683840772])
+
+        C = np.array([0.0, 1./9, 2./9, 3./9, 4./9, 5./9, 6./9, 7./9, 8./9, 1.0])
+
+        Bhat = np.array([0.393532508039953, 0.103698834129218, 1.762063014496891, -7.975545473944710, 17.369144216329801,
+                         -23.392811504681202, 20.502287838369053, -11.411634409951532, 3.649264977212526, 0.0])
+
+        kappa = 0.501223692278266
+        B = np.array([(1. - kappa), 0., 0., 0., 0., 0., 0., 0., 0., kappa])
+        E = [b - bh for b, bh in zip(B, Bhat)]
+
+        # Get the bank indices for pseudo-registers (n+1,m; n+1,m+1; rhs),
+        # where m = pseudo-time and n = real-time
+
+        r0, r1, r2, r3, rerr = set(self._pseudo_stepper_regidx)
+
+        if r0 != self._idxcurr:
+            r0, r3 = r3, r0
+
+        # First stage; r1 = -∇·f(r0)
+        rhs(t, r0, r1)
+        self.localdtau(r1)
+        add(0.0, r3, 1.0, r0, B[0], r1)
+        if errest:
+            add(0.0, rerr, E[0], r1)
+
+        # Second stage;
+        add(0, r2, 1, r0, Adiag[1], r1)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[1], r2)
+
+        # Third stage;
+        add(0, r2, 1, r0, (C[2] - Adiag[2]), r1, Adiag[2], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[2], r2)
+
+        # Fourth stage;
+        add(0, r2, 1, r0, (C[3] - Adiag[3]), r1,  Adiag[3], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[3], r2)
+
+        # Fifth stage;
+        add(0, r2, 1, r0, (C[4] - Adiag[4]), r1, Adiag[4], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[4], r2)
+
+        # Sixth stage;
+        add(0, r2, 1, r0, (C[5] - Adiag[5]), r1, Adiag[5], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[5], r2)
+
+        # Seventh stage;
+        add(0, r2, 1, r0, (C[6] - Adiag[6]), r1, Adiag[6], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[6], r2)
+
+        # Eighth stage;
+        add(0, r2, 1, r0, (C[7] - Adiag[7]), r1, Adiag[7], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[7], r2)
+
+        # Ninth stage;
+        add(0, r2, 1, r0, (C[8] - Adiag[8]), r1, Adiag[8], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+
+        if errest:
+            add(1.0, rerr, E[8], r2)
+
+        # Tenth stage;
+        add(0, r2, 1, r0, (C[9] - Adiag[9]), r1, Adiag[9], r2)
+        rhs(t, r2, r2)
+        self.localdtau(r2)
+        add(1.0, r3, B[9], r2)
+        if errest:
+            add(1.0, rerr, E[9], r2)
+
+        # Return the index of the bank containing u(n+1,m+1)
+        return (r3, r0, rerr) if errest else (r3, r0)
+
