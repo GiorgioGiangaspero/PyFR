@@ -94,17 +94,25 @@ class DualSkoptController(BaseDualController):
         # that we can start fresh at the next iteration.
         psnregs = self.pseudointegrator.pintg._pseudo_stepper_nregs
 
-        u_src   = self.pseudointegrator.pintg._regidx[psnregs-2]
-        um1_src = self.pseudointegrator.pintg._regidx[psnregs-1]
+        # u_src   = self.pseudointegrator.pintg._regidx[psnregs-2]
+        # um1_src = self.pseudointegrator.pintg._regidx[psnregs-1]
         # same as
         # u_src   = self.pseudointegrator.pintg._pseudo_stepper_regidx[-2]
         # um1_src = self.pseudointegrator.pintg._pseudo_stepper_regidx[-1]
+        # u_src   = self.pseudointegrator.pintg._stepper_regidx[0]
+        # um1_src = self.pseudointegrator.pintg._stepper_regidx[1]
 
-        u_dst   = self.pseudointegrator.pintg._regidx[psnregs]
-        um1_dst = self.pseudointegrator.pintg._regidx[psnregs+1]
+        # u_dst   = self.pseudointegrator.pintg._regidx[psnregs]
+        # um1_dst = self.pseudointegrator.pintg._regidx[psnregs+1]
 
-        # print('Reject sol approach 1:')
-        # print('u_src, um1_src, u_dst, um1_dst = {},{},{},{}'.format(u_src, um1_src, u_dst, um1_dst))
+        u_src   = self.pseudointegrator.pintg._pseudo_stepper_regidx[-2]
+        um1_src = self.pseudointegrator.pintg._pseudo_stepper_regidx[-1]
+
+        u_dst   = self.pseudointegrator.pintg._stepper_regidx[0] #n
+        um1_dst = self.pseudointegrator.pintg._stepper_regidx[1] #n-1
+
+        print('Reject sol approach 1:')
+        print('u_src, um1_src, u_dst, um1_dst = {},{},{},{}'.format(u_src, um1_src, u_dst, um1_dst))
 
         # u_dst   = self.pseudointegrator.pintg._idxcurr
         # um1_dst = self.pseudointegrator.pintg._idxprev
@@ -115,14 +123,21 @@ class DualSkoptController(BaseDualController):
         self.pseudointegrator.pintg._add(0, u_dst,   1, u_src)
         self.pseudointegrator.pintg._add(0, um1_dst, 1, um1_src)
 
+        # #Copy it also the idxcurr
+        # self.pseudointegrator.pintg._add(0, self.pseudointegrator.pintg._idxcurr, 1, u_src)
+        # self.pseudointegrator.pintg._add(0, self.pseudointegrator.pintg._idxprev, 1, um1_src)
+
+        # # Invalidate the solution cache
+        # self._curr_soln = None
+
     def store_curr_sol(self):
         psnregs = self.pseudointegrator.pintg._pseudo_stepper_nregs
 
-        u_src   = self.pseudointegrator.pintg._regidx[psnregs]
-        um1_src = self.pseudointegrator.pintg._regidx[psnregs+1]
+        # u_src   = self.pseudointegrator.pintg._regidx[psnregs]
+        # um1_src = self.pseudointegrator.pintg._regidx[psnregs+1]
 
-        u_dst   = self.pseudointegrator.pintg._regidx[psnregs-2]
-        um1_dst = self.pseudointegrator.pintg._regidx[psnregs-1]
+        # u_dst   = self.pseudointegrator.pintg._regidx[psnregs-2]
+        # um1_dst = self.pseudointegrator.pintg._regidx[psnregs-1]
         # same as
         # u_dst   = self.pseudointegrator.pintg._pseudo_stepper_regidx[-2]
         # um1_dst = self.pseudointegrator.pintg._pseudo_stepper_regidx[-1]
@@ -135,6 +150,12 @@ class DualSkoptController(BaseDualController):
 
         # print('Store current sol approach 2:')
         # print('u_src, um1_src, u_dst, um1_dst = {},{},{},{}'.format(u_src, um1_src, u_dst, um1_dst))
+
+        u_dst   = self.pseudointegrator.pintg._pseudo_stepper_regidx[-2]
+        um1_dst = self.pseudointegrator.pintg._pseudo_stepper_regidx[-1]
+
+        u_src   = self.pseudointegrator.pintg._stepper_regidx[0] #n
+        um1_src = self.pseudointegrator.pintg._stepper_regidx[1] #n-1
 
         self.pseudointegrator.pintg._add(0, u_dst,   1, u_src)
         self.pseudointegrator.pintg._add(0, um1_dst, 1, um1_src)
