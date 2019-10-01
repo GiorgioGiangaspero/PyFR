@@ -4,6 +4,9 @@ from pyfr.integrators.std.base import BaseStdIntegrator
 
 
 class BaseStdStepper(BaseStdIntegrator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
     def collect_stats(self, stats):
         super().collect_stats(stats)
 

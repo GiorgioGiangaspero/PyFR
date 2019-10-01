@@ -4,7 +4,8 @@ from pyfr.integrators.dual.phys.base import BaseDualIntegrator
 
 
 class BaseDualStepper(BaseDualIntegrator):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class DualBDF2Stepper(BaseDualStepper):
