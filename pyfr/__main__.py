@@ -80,6 +80,19 @@ def main():
                            'defaults to single')
     ap_export.set_defaults(process=process_export)
 
+    #Interpolate command
+    ap_interpolate = sp.add_parser('interpolate', help='interpolate --help')
+    ap_interpolate.add_argument('inmesh', type=str, help='input mesh file')
+    ap_interpolate.add_argument('insolution', type=str,
+                                 help='input solution file')
+    ap_interpolate.add_argument('outmesh', type=str,
+                                help='output PyFR mesh file')
+    ap_interpolate.add_argument('outconfig', type=FileType('r'),
+                                help='output config file')
+    ap_interpolate.add_argument('outsolution', type=str,
+                                help='output solution file')
+    ap_interpolate.set_defaults(process=process_interpolate)
+
     # Run command
     ap_run = sp.add_parser('run', help='run --help')
     ap_run.add_argument('mesh', help='mesh file')
@@ -111,6 +124,185 @@ def main():
     else:
         ap.print_help()
 
+def get_eles(mesh, soln, cfg):
+    from pyfr.shapes import BaseShape
+    from pyfr.solvers.base import BaseSystem
+    from pyfr.util import subclass_where, proxylist
+    from collections import OrderedDict
+    import re
+
+    if soln:
+        if mesh['mesh_uuid'] != soln['mesh_uuid']:
+            raise RuntimeError('Mesh {} and solution {} have different '
+                               'uuid'.format(mesh.fname, soln.fname))
+
+    # Create a backend
+    systemcls = subclass_where(BaseSystem,
+                               name=cfg.get('solver', 'system'))
+
+    # Get the elementscls
+    elementscls = systemcls.elementscls
+
+    basismap = {b.name: b for b in subclasses(BaseShape, just_leaf=True)}
+
+    # Get the number of partitions
+    ai  = mesh.array_info('spt')
+    npr = max(int(re.search(r'\d+$', k).group(0)) for k in ai) + 1
+
+    # Look for and load each element type from the mesh. One partition at the
+    # time, save them in a list
+    eles_partitions = []
+    etypes_partitions = []
+    for p in range(npr):
+        elemap = OrderedDict()
+        for f in mesh:
+            m = re.match('spt_(.+?)_p{}$'.format(p), f)
+            if m:
+                # Element type
+                t = m.group(1)
+
+                elemap[t] = elementscls(basismap[t], mesh[f], cfg)
+
+        # Process the solution
+        if soln:
+            for k, ele in elemap.items():
+                solnp = soln['soln_{}_p{}'.format(k, p)]
+                ele.set_ics_from_soln(solnp, cfg)
+
+        etypes_partitions.append(list(elemap.keys()))
+
+        # Construct a proxylist to simplify collective operations
+        eles_partitions.append(proxylist(elemap.values()))
+
+    return eles_partitions, etypes_partitions
+
+def process_interpolate(args):
+    from collections import OrderedDict
+    from pyfr.plugins.sampler import _closest_upts
+    import numpy as np
+
+    try:
+        from scipy.spatial import cKDTree
+    except ImportError:
+        raise RuntimeError('Process interpolate requires the scipy package')
+
+
+    # Read the input mesh
+    in_mesh = NativeReader(args.inmesh)
+
+    # #Get the number of elements of each type in each partition: meshinfo[etype][part]
+    # in_meshinfo = in_mesh.partition_info('spt')
+
+    # Read the output mesh
+    out_mesh = NativeReader(args.outmesh)
+
+    # Read the in solution
+    in_solution = NativeReader(args.insolution)
+
+    # Read the in config from solution file
+    in_cfg = Inifile(in_solution['config'])
+
+    # Get the prefix and the number of variables stored in the input solution
+    # The data file prefix defaults to soln for backwards compatibility
+    stats_in = Inifile(in_solution['stats'])
+    prefix = stats_in.get('data', 'prefix', 'soln')
+
+    in_mesh_inf = in_mesh.array_info('spt')
+    in_soln_inf = in_solution.array_info(prefix)
+
+    ndims = next(iter(in_mesh_inf.values()))[1][2]
+    nvars = next(iter(in_soln_inf.values()))[1][1]
+
+    # Read the output config
+    out_cfg = Inifile.load(args.outconfig)
+
+    # Load the elements of the input mesh: a list of lists. The outer element
+    # of the list is for the partition, the inner is for the elements type.
+    # Pass the in_solution only if a proper interpolation is needed rather than
+    # a minimum distance search.
+    # in_eles_p, in_etypes_p = get_eles(in_mesh, in_solution, in_cfg)
+    in_eles_p, in_etypes_p = get_eles(in_mesh, None, in_cfg)
+
+    # Load the elements of the output mesh
+    out_eles_p, out_etypes_p = get_eles(out_mesh, None, out_cfg)
+
+    # Create the solution map for output
+    solnmap = OrderedDict()
+    solnmap['mesh_uuid'] = out_mesh['mesh_uuid']
+    solnmap['stats'] = in_solution['stats']
+    solnmap['config'] = out_cfg.tostr()
+
+    #TODO take into account the possibility of not having scipy installed.
+
+    # Build the trees of the source mesh.
+    trees_partition = []
+    for eles_in in in_eles_p:
+        # Get all the solution point locations for the elements
+        eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_in]
+
+        # Flatten the physical location arrays
+        feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
+
+        # For each element type construct a KD-tree of the upt locations
+        trees = [cKDTree(f) for f in feupts]
+
+        trees_partition.append((trees, eupts))
+
+    # Loop over the partitions of the output mesh.
+    for idxp_out, (eles_out, etypes_out) in enumerate(zip(out_eles_p, out_etypes_p)):
+        # Get all the solution point locations for the elements
+        eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_out]
+
+        # Flatten the physical location arrays
+        feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
+
+        # loop over the points of each element type of this partition of the
+        # output mesh
+        for pts, oe, etype in zip(feupts, eles_out, etypes_out):
+            donors = []
+            donors_ptrn = [] #partition number of each donor
+            # Loop over the trees of the input (donor) mesh and look for donors
+            for idxp_in,((trees, eupts_tree),etypes) in enumerate(zip(trees_partition, in_etypes_p)):
+
+                # Locate the closest solution points
+                closest = _closest_upts(etypes, eupts_tree, pts, trees=trees)
+
+                if not donors and not donors_ptrn:
+                    # Initialize the lists.
+                    donors = list(closest)
+                    donors_ptrn = [idxp_in for d in range(len(donors))]
+                else:
+                    # loop over the points in this partition of the receiving mesh
+                    for idx, (cp, dn) in enumerate(zip(closest, donors)):
+                        # Update donors if the distance is smaller than before
+                        if cp[0] < dn[0]:
+                            donors[idx] = cp
+                            donors_ptrn[idx] = idxp_in
+
+            # Now that we know the donors of this partition and this element
+            # type, copy the solution
+            out_soln = np.empty((oe.nupts, nvars, oe.neles))
+
+            for idx,(dn,ptrn) in enumerate(zip(donors,donors_ptrn)):
+                dn_ui, dn_ei = dn[-1]
+                in_sol = in_solution['{}_{}_p{}'.format(prefix, dn[-2], ptrn)]
+
+                # # in case a proper interpolation is needed
+                # dn_etype = in_etypes_p[ptrn].index(dn[-2])
+                # in_sol = in_eles_p[ptrn][dn_etype]._scal_upts
+
+                #from idx get rc_ui, and rc_ei. then copy the solution.
+                rc_ui, rc_ei = np.unravel_index(idx, out_soln.swapaxes(0,1).shape[1:])
+
+                out_soln[rc_ui,:,rc_ei] = in_sol[dn_ui, :, dn_ei]
+
+            # save the partition in the solution dictionary.
+            solnmap['{}_{}_p{}'.format(prefix, etype, idxp_out)] = out_soln
+
+    # write the new solution to file.
+    with h5py.File(args.outsolution, 'w-') as msh5:
+        for k, v in solnmap.items():
+            msh5.create_dataset(k, data=v)
 
 def process_import(args):
     # Get a suitable mesh reader instance

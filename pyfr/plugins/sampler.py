@@ -22,14 +22,15 @@ def _closest_upts_bf(etypes, eupts, pts):
         yield min(zip(dmins, plocs, etypes, amins))
 
 
-def _closest_upts_kd(etypes, eupts, pts):
+def _closest_upts_kd(etypes, eupts, pts, trees=None):
     from scipy.spatial import cKDTree
 
-    # Flatten the physical location arrays
-    feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
+    if not trees:
+        # Flatten the physical location arrays
+        feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
 
-    # For each element type construct a KD-tree of the upt locations
-    trees = [cKDTree(f) for f in feupts]
+        # For each element type construct a KD-tree of the upt locations
+        trees = [cKDTree(f) for f in feupts]
 
     for p in pts:
         # Query the distance/index of the closest upt to p
@@ -46,10 +47,10 @@ def _closest_upts_kd(etypes, eupts, pts):
         yield min(zip(dmins, plocs, etypes, amins))
 
 
-def _closest_upts(etypes, eupts, pts):
+def _closest_upts(etypes, eupts, pts, trees=None):
     try:
         # Attempt to use a KD-tree based approach
-        yield from _closest_upts_kd(etypes, eupts, pts)
+        yield from _closest_upts_kd(etypes, eupts, pts, trees)
     except ImportError:
         # Otherwise fall back to brute force
         yield from _closest_upts_bf(etypes, eupts, pts)
