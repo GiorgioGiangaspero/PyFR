@@ -165,8 +165,10 @@ def get_eles(mesh, soln, cfg):
 
         # Process the solution
         if soln:
+            prefix = Inifile(soln['stats']).get('data', 'prefix', 'soln')
+
             for k, ele in elemap.items():
-                solnp = soln['soln_{}_p{}'.format(k, p)]
+                solnp = soln['{}_{}_p{}'.format(prefix, k, p)]
                 ele.set_ics_from_soln(solnp, cfg)
 
         etypes_partitions.append(list(elemap.keys()))
@@ -232,13 +234,24 @@ def process_interpolate(args):
     solnmap['stats'] = in_solution['stats']
     solnmap['config'] = out_cfg.tostr()
 
+    # Open the file and write what we have so far.
+    msh5 = h5py.File(args.outsolution, 'w-')
+    for k, v in solnmap.items():
+        msh5.create_dataset(k, data=v)
+
     #TODO take into account the possibility of not having scipy installed.
 
     # Build the trees of the source mesh.
     trees_partition = []
-    for eles_in in in_eles_p:
+    for idxp_in, eles_in in enumerate(in_eles_p):
+        print('Creating trees of input parition {}...'.format(idxp_in))
         # Get all the solution point locations for the elements
         eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_in]
+
+        #TODO get the centers of each element, mean coord of its sol points
+        #TODO should do this based on the elements coordinates rather than on the
+        # solution points!
+        #eupts = [np.mean(e.ploc_at_np('upts').swapaxes(1, 2), axis=0) for e in eles_in]
 
         # Flatten the physical location arrays
         feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
@@ -250,6 +263,7 @@ def process_interpolate(args):
 
     # Loop over the partitions of the output mesh.
     for idxp_out, (eles_out, etypes_out) in enumerate(zip(out_eles_p, out_etypes_p)):
+        print('Working on outsol parition {}...'.format(idxp_out))
         # Get all the solution point locations for the elements
         eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_out]
 
@@ -297,12 +311,15 @@ def process_interpolate(args):
                 out_soln[rc_ui,:,rc_ei] = in_sol[dn_ui, :, dn_ei]
 
             # save the partition in the solution dictionary.
-            solnmap['{}_{}_p{}'.format(prefix, etype, idxp_out)] = out_soln
+            # solnmap['{}_{}_p{}'.format(prefix, etype, idxp_out)] = out_soln
+            msh5.create_dataset('{}_{}_p{}'.format(prefix, etype, idxp_out),
+                                data=out_soln)
 
-    # write the new solution to file.
-    with h5py.File(args.outsolution, 'w-') as msh5:
-        for k, v in solnmap.items():
-            msh5.create_dataset(k, data=v)
+    msh5.close()
+    # # write the new solution to file.
+    # with h5py.File(args.outsolution, 'w-') as msh5:
+    #     for k, v in solnmap.items():
+    #         msh5.create_dataset(k, data=v)
 
 def process_import(args):
     # Get a suitable mesh reader instance
