@@ -80,18 +80,16 @@ def main():
                            'defaults to single')
     ap_export.set_defaults(process=process_export)
 
-    #Interpolate command
-    ap_interpolate = sp.add_parser('interpolate', help='interpolate --help')
-    ap_interpolate.add_argument('inmesh', type=str, help='input mesh file')
-    ap_interpolate.add_argument('insolution', type=str,
+    #Map command
+    ap_map = sp.add_parser('map', help='map --help')
+    ap_map.add_argument('inmesh', type=str, help='input mesh file')
+    ap_map.add_argument('insolution', type=str,
                                  help='input solution file')
-    ap_interpolate.add_argument('outmesh', type=str,
+    ap_map.add_argument('outmesh', type=str,
                                 help='output PyFR mesh file')
-    ap_interpolate.add_argument('outconfig', type=FileType('r'),
-                                help='output config file')
-    ap_interpolate.add_argument('outsolution', type=str,
+    ap_map.add_argument('outsolution', type=str,
                                 help='output solution file')
-    ap_interpolate.set_defaults(process=process_interpolate)
+    ap_map.set_defaults(process=process_map)
 
     # Run command
     ap_run = sp.add_parser('run', help='run --help')
@@ -179,7 +177,6 @@ def get_eles(mesh, soln, cfg):
     return eles_partitions, etypes_partitions
 
 def _closest_el(pts, tree, name):
-    from scipy.spatial import cKDTree
     import numpy as np
 
     # Query the distance/index of the closest pts
@@ -195,16 +192,15 @@ def _closest_el(pts, tree, name):
 
     return closest
 
-def process_interpolate(args):
+def process_map(args):
     from collections import OrderedDict
-    from pyfr.plugins.sampler import _closest_upts
     import numpy as np
     import itertools
 
     try:
         from scipy.spatial import cKDTree
     except ImportError:
-        raise RuntimeError('Process interpolate requires the scipy package')
+        raise RuntimeError('Process Map requires the scipy package')
 
 
     # Read the input mesh
@@ -234,9 +230,6 @@ def process_interpolate(args):
     ndims = next(iter(in_mesh_inf.values()))[1][2]
     nvars = next(iter(in_soln_inf.values()))[1][1]
 
-    # Read the output config
-    out_cfg = Inifile.load(args.outconfig)
-
     # Load the elements of the input mesh: a list of lists. The outer element
     # of the list is for the partition, the inner is for the elements type.
     # Pass the in_solution only if a proper interpolation is needed rather than
@@ -245,29 +238,23 @@ def process_interpolate(args):
     in_eles_p, in_etypes_p = get_eles(in_mesh, None, in_cfg)
 
     # Load the elements of the output mesh
-    out_eles_p, out_etypes_p = get_eles(out_mesh, None, out_cfg)
+    out_eles_p, out_etypes_p = get_eles(out_mesh, None, in_cfg)
 
     # Create the solution map for output
     solnmap = OrderedDict()
     solnmap['mesh_uuid'] = out_mesh['mesh_uuid']
     solnmap['stats'] = in_solution['stats']
-    solnmap['config'] = out_cfg.tostr()
+    solnmap['config'] = in_solution['config']
 
     # Open the file and write what we have so far.
     msh5 = h5py.File(args.outsolution, 'w-')
     for k, v in solnmap.items():
         msh5.create_dataset(k, data=v)
 
-    #TODO take into account the possibility of not having scipy installed.
-
     # Build the trees of the source mesh.
     trees_partition = []
-    print('Creating trees of input partions...')
+    print('Creating trees of input partitions...')
     for i_p_name, (i_etype, i_shape) in in_mesh_inf.items():
-        # print('Creating trees of input partion {}...'.format(i_p_name))
-        # # Get all the solution point locations for the elements
-        # eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_in]
-
         # Get the centers of each element
         i_eupts = np.mean(in_mesh[i_p_name], axis=0)
 
@@ -307,15 +294,6 @@ def process_interpolate(args):
                 ii = np.argwhere(closest['d'] < donors['d'])
                 donors[ii] = closest[ii]
 
-
-                # # loop over the elements in this partition of the receiving mesh
-                # for idx in range(oe.neles):
-                #     # Update donors if the distance is smaller than before
-                #     if closest[0][idx] < donors[0][idx]:
-                #         donors[0][idx] = closest[0][idx]
-                #         donors[1][idx] = closest[1][idx]
-                #         donors_p[idx]  = i_p_name
-
         # Check that we got zero distance
         if not np.allclose(donors['d'], 0.0):
             raise RuntimeError('The closest point distance is not zero everywhere.')
@@ -337,70 +315,9 @@ def process_interpolate(args):
 
             offset += nd
 
-
-        # for idx in range(oe.neles):
-        #     print('Copy the solution of element number {}'.format(idx))
-        #     in_sol = in_solution[donors_p[idx].replace('spt', prefix)]
-
-        #     out_soln[...,idx] = in_sol[..., donors[1][idx]]
-
         # save the partition in the solution dictionary.
         msh5.create_dataset(o_p_name.replace('spt', prefix),
                                 data=out_soln)
-
-
-    # for idxp_out, (eles_out, etypes_out) in enumerate(zip(out_eles_p, out_etypes_p)):
-    #     print('Working on outsol parition {}...'.format(idxp_out))
-    #     # Get all the solution point locations for the elements
-    #     eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_out]
-
-    #     # Flatten the physical location arrays
-    #     feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
-
-    #     # loop over the points of each element type of this partition of the
-    #     # output mesh
-    #     for pts, oe, etype in zip(feupts, eles_out, etypes_out):
-    #         donors = []
-    #         donors_ptrn = [] #partition number of each donor
-    #         # Loop over the trees of the input (donor) mesh and look for donors
-    #         for idxp_in,((trees, eupts_tree),etypes) in enumerate(zip(trees_partition, in_etypes_p)):
-
-    #             # Locate the closest solution points
-    #             closest = _closest_upts(etypes, eupts_tree, pts, trees=trees)
-
-    #             if not donors and not donors_ptrn:
-    #                 # Initialize the lists.
-    #                 donors = list(closest)
-    #                 donors_ptrn = [idxp_in for d in range(len(donors))]
-    #             else:
-    #                 # loop over the points in this partition of the receiving mesh
-    #                 for idx, (cp, dn) in enumerate(zip(closest, donors)):
-    #                     # Update donors if the distance is smaller than before
-    #                     if cp[0] < dn[0]:
-    #                         donors[idx] = cp
-    #                         donors_ptrn[idx] = idxp_in
-
-    #         # Now that we know the donors of this partition and this element
-    #         # type, copy the solution
-    #         out_soln = np.empty((oe.nupts, nvars, oe.neles))
-
-    #         for idx,(dn,ptrn) in enumerate(zip(donors,donors_ptrn)):
-    #             dn_ui, dn_ei = dn[-1]
-    #             in_sol = in_solution['{}_{}_p{}'.format(prefix, dn[-2], ptrn)]
-
-    #             # # in case a proper interpolation is needed
-    #             # dn_etype = in_etypes_p[ptrn].index(dn[-2])
-    #             # in_sol = in_eles_p[ptrn][dn_etype]._scal_upts
-
-    #             #from idx get rc_ui, and rc_ei. then copy the solution.
-    #             rc_ui, rc_ei = np.unravel_index(idx, out_soln.swapaxes(0,1).shape[1:])
-
-    #             out_soln[rc_ui,:,rc_ei] = in_sol[dn_ui, :, dn_ei]
-
-    #         # save the partition in the solution dictionary.
-    #         # solnmap['{}_{}_p{}'.format(prefix, etype, idxp_out)] = out_soln
-    #         msh5.create_dataset('{}_{}_p{}'.format(prefix, etype, idxp_out),
-    #                             data=out_soln)
 
     msh5.close()
 
