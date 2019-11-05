@@ -243,8 +243,8 @@ def process_map(args):
     # Create the solution map for output
     solnmap = OrderedDict()
     solnmap['mesh_uuid'] = out_mesh['mesh_uuid']
-    solnmap['stats'] = in_solution['stats']
-    solnmap['config'] = in_solution['config']
+    solnmap['stats'] = stats_in.tostr().encode()
+    solnmap['config'] = in_cfg.tostr().encode()
 
     # Open the file and write what we have so far.
     msh5 = h5py.File(args.outsolution, 'w-')
