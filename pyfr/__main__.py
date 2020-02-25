@@ -80,18 +80,28 @@ def main():
                            'defaults to single')
     ap_export.set_defaults(process=process_export)
 
-    #Interpolate command
-    ap_interpolate = sp.add_parser('interpolate', help='interpolate --help')
-    ap_interpolate.add_argument('inmesh', type=str, help='input mesh file')
-    ap_interpolate.add_argument('insolution', type=str,
+    #spanwise_avg command
+    ap_spanwise_avg = sp.add_parser('spanwise_avg', help='spanwise_avg --help')
+    ap_spanwise_avg.add_argument('inmesh', type=str, help='input mesh file')
+    ap_spanwise_avg.add_argument('insolution', type=str,
                                  help='input solution file')
-    ap_interpolate.add_argument('outmesh', type=str,
-                                help='output PyFR mesh file')
-    ap_interpolate.add_argument('outconfig', type=FileType('r'),
-                                help='output config file')
-    ap_interpolate.add_argument('outsolution', type=str,
-                                help='output solution file')
-    ap_interpolate.set_defaults(process=process_interpolate)
+    ap_spanwise_avg.add_argument('spanwise_direction', choices=['x', 'y', 'z'],
+                                 default='z', help='spanwise direction')
+    ap_spanwise_avg.add_argument('streamwise_direction', choices=['x', 'y', 'z'],
+                                 default='x', help='streamwise_direction direction')
+    ap_spanwise_avg.add_argument('n_streamwise_stations', type=int,
+                                 default=100, help='number of sample points along '
+                                 'along the streamwise direction')
+    ap_spanwise_avg.add_argument('n_spanwise_stations', type=int,
+                                 default=100, help='number of sample points along '
+                                 'along the spanwise direction')
+    ap_spanwise_avg.add_argument('n_otherdir_stations', type=int,
+                                 default=100, help='number of sample points along '
+                                 'along the other direction (normal to streamwise '
+                                 ' and spanwise')
+    ap_spanwise_avg.add_argument('outsolution', type=str,
+                                 default='spanwise_avg.csv', help='output .csv file')
+    ap_spanwise_avg.set_defaults(process=process_spanwise_avg)
 
     # Run command
     ap_run = sp.add_parser('run', help='run --help')
@@ -178,7 +188,7 @@ def get_eles(mesh, soln, cfg):
 
     return eles_partitions, etypes_partitions
 
-def process_interpolate(args):
+def process_spanwise_avg(args):
     from collections import OrderedDict
     from pyfr.plugins.sampler import _closest_upts
     import numpy as np
@@ -186,17 +196,25 @@ def process_interpolate(args):
     try:
         from scipy.spatial import cKDTree
     except ImportError:
-        raise RuntimeError('Process interpolate requires the scipy package')
+        raise RuntimeError('Process spanwise_avg requires the scipy package')
 
 
     # Read the input mesh
     in_mesh = NativeReader(args.inmesh)
 
-    # #Get the number of elements of each type in each partition: meshinfo[etype][part]
-    # in_meshinfo = in_mesh.partition_info('spt')
-
-    # Read the output mesh
-    out_mesh = NativeReader(args.outmesh)
+    # Get the bounds of this mesh
+    bounds = None # xyz, min/max
+    for part in in_mesh.keys():
+        if 'spt' in part:
+            mmin = np.min(in_mesh[part].reshape(-1, in_mesh[part].shape[-1]), axis=0)
+            mmax = np.max(in_mesh[part].reshape(-1, in_mesh[part].shape[-1]), axis=0)
+            if bounds is not None:
+                bounds[:, 0] = np.minimum(mmin, bounds[:,0])
+                bounds[:, 1] = np.maximum(mmax, bounds[:,1])
+            else:
+                bounds = np.empty((3,2))
+                bounds[:, 0] = mmin
+                bounds[:, 1] = mmax
 
     # Read the in solution
     in_solution = NativeReader(args.insolution)
@@ -208,6 +226,7 @@ def process_interpolate(args):
     # The data file prefix defaults to soln for backwards compatibility
     stats_in = Inifile(in_solution['stats'])
     prefix = stats_in.get('data', 'prefix', 'soln')
+    varnames = stats_in.get('data', 'fields').split(',')
 
     in_mesh_inf = in_mesh.array_info('spt')
     in_soln_inf = in_solution.array_info(prefix)
@@ -215,8 +234,41 @@ def process_interpolate(args):
     ndims = next(iter(in_mesh_inf.values()))[1][2]
     nvars = next(iter(in_soln_inf.values()))[1][1]
 
-    # Read the output config
-    out_cfg = Inifile.load(args.outconfig)
+    # Define the locations of the points where we are interpolating and later
+    # spanwise averaging.
+    coord_to_idx = {'x':0, 'y':1, 'z':2}
+    otherdir_direction = [d for d in coord_to_idx.keys() if d is not args.streamwise_direction and d is not args.spanwise_direction][0]
+    mmin = bounds[coord_to_idx[args.streamwise_direction], 0]
+    mmax = bounds[coord_to_idx[args.streamwise_direction], 1]
+    str_stations = np.linspace(mmin, mmax, num=args.n_streamwise_stations, endpoint=True)
+
+    mmin = bounds[coord_to_idx[args.spanwise_direction], 0]
+    mmax = bounds[coord_to_idx[args.spanwise_direction], 1]
+    spn_stations = np.linspace(mmin, mmax, num=args.n_spanwise_stations, endpoint=False)
+
+    mmin = bounds[coord_to_idx[otherdir_direction], 0]
+    mmax = bounds[coord_to_idx[otherdir_direction], 1]
+    oth_stations = np.linspace(mmin, mmax, num=args.n_otherdir_stations, endpoint=True)
+
+    #Put them together. i am not smart enough to do this properly
+    recv_loc = np.empty((ndims,
+                         args.n_streamwise_stations,
+                         args.n_spanwise_stations,
+                         args.n_otherdir_stations))
+    for i in range(args.n_streamwise_stations):
+        icoord = str_stations[i]
+        for j in range(args.n_spanwise_stations):
+            jcoord = spn_stations[j]
+            for k in range(args.n_otherdir_stations):
+                kcoord = oth_stations[k]
+                recv_loc[coord_to_idx[args.streamwise_direction], i, j, k] = icoord
+                recv_loc[coord_to_idx[args.spanwise_direction], i, j, k] = jcoord
+                recv_loc[coord_to_idx[otherdir_direction], i, j, k] = kcoord
+
+
+    # Allocate the memory for the solution. Rmemebr to order it in the steamwise
+    # TODO direction before writing it to file
+    out_soln = np.empty((nvars, *recv_loc.shape[1:])).reshape((nvars, -1))
 
     # Load the elements of the input mesh: a list of lists. The outer element
     # of the list is for the partition, the inner is for the elements type.
@@ -224,20 +276,6 @@ def process_interpolate(args):
     # a minimum distance search.
     # in_eles_p, in_etypes_p = get_eles(in_mesh, in_solution, in_cfg)
     in_eles_p, in_etypes_p = get_eles(in_mesh, None, in_cfg)
-
-    # Load the elements of the output mesh
-    out_eles_p, out_etypes_p = get_eles(out_mesh, None, out_cfg)
-
-    # Create the solution map for output
-    solnmap = OrderedDict()
-    solnmap['mesh_uuid'] = out_mesh['mesh_uuid']
-    solnmap['stats'] = in_solution['stats']
-    solnmap['config'] = out_cfg.tostr()
-
-    # Open the file and write what we have so far.
-    msh5 = h5py.File(args.outsolution, 'w-')
-    for k, v in solnmap.items():
-        msh5.create_dataset(k, data=v)
 
     #TODO take into account the possibility of not having scipy installed.
 
@@ -248,11 +286,6 @@ def process_interpolate(args):
         # Get all the solution point locations for the elements
         eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_in]
 
-        #TODO get the centers of each element, mean coord of its sol points
-        #TODO should do this based on the elements coordinates rather than on the
-        # solution points!
-        #eupts = [np.mean(e.ploc_at_np('upts').swapaxes(1, 2), axis=0) for e in eles_in]
-
         # Flatten the physical location arrays
         feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
 
@@ -261,62 +294,66 @@ def process_interpolate(args):
 
         trees_partition.append((trees, eupts))
 
-    # Loop over the partitions of the output mesh.
-    for idxp_out, (eles_out, etypes_out) in enumerate(zip(out_eles_p, out_etypes_p)):
-        print('Working on outsol parition {}...'.format(idxp_out))
-        # Get all the solution point locations for the elements
-        eupts = [e.ploc_at_np('upts').swapaxes(1, 2) for e in eles_out]
+    # Get the donors for the receiver points
+    pts = recv_loc.reshape((ndims, -1)).swapaxes(0,1)
+    donors = []
+    donors_ptrn = [] #partition number of each donor
+    # Loop over the trees of the input (donor) mesh and look for donors
+    for idxp_in,((trees, eupts_tree),etypes) in enumerate(zip(trees_partition, in_etypes_p)):
 
-        # Flatten the physical location arrays
-        feupts = [e.reshape(-1, e.shape[-1]) for e in eupts]
+        # Locate the closest solution points
+        closest = _closest_upts(etypes, eupts_tree, pts, trees=trees)
 
-        # loop over the points of each element type of this partition of the
-        # output mesh
-        for pts, oe, etype in zip(feupts, eles_out, etypes_out):
-            donors = []
-            donors_ptrn = [] #partition number of each donor
-            # Loop over the trees of the input (donor) mesh and look for donors
-            for idxp_in,((trees, eupts_tree),etypes) in enumerate(zip(trees_partition, in_etypes_p)):
+        if not donors and not donors_ptrn:
+            # Initialize the lists.
+            donors = list(closest)
+            donors_ptrn = [idxp_in for d in range(len(donors))]
+        else:
+            # loop over the points in this partition of the receiving mesh
+            for idx, (cp, dn) in enumerate(zip(closest, donors)):
+                # Update donors if the distance is smaller than before
+                if cp[0] < dn[0]:
+                    donors[idx] = cp
+                    donors_ptrn[idx] = idxp_in
 
-                # Locate the closest solution points
-                closest = _closest_upts(etypes, eupts_tree, pts, trees=trees)
+    # Now that we know the donors, copy the solution
+    for idx,(dn,ptrn) in enumerate(zip(donors,donors_ptrn)):
+        dn_ui, dn_ei = dn[-1]
+        in_sol = in_solution['{}_{}_p{}'.format(prefix, dn[-2], ptrn)]
 
-                if not donors and not donors_ptrn:
-                    # Initialize the lists.
-                    donors = list(closest)
-                    donors_ptrn = [idxp_in for d in range(len(donors))]
-                else:
-                    # loop over the points in this partition of the receiving mesh
-                    for idx, (cp, dn) in enumerate(zip(closest, donors)):
-                        # Update donors if the distance is smaller than before
-                        if cp[0] < dn[0]:
-                            donors[idx] = cp
-                            donors_ptrn[idx] = idxp_in
+        # # in case a proper interpolation is needed
+        # dn_etype = in_etypes_p[ptrn].index(dn[-2])
+        # in_sol = in_eles_p[ptrn][dn_etype]._scal_upts
 
-            # Now that we know the donors of this partition and this element
-            # type, copy the solution
-            out_soln = np.empty((oe.nupts, nvars, oe.neles))
+        out_soln[:, idx] = in_sol[dn_ui, :, dn_ei]
 
-            for idx,(dn,ptrn) in enumerate(zip(donors,donors_ptrn)):
-                dn_ui, dn_ei = dn[-1]
-                in_sol = in_solution['{}_{}_p{}'.format(prefix, dn[-2], ptrn)]
+    # write the new solution to file.
+    out_soln = out_soln.reshape((nvars, *recv_loc.shape[1:]))
+    # sol has now the shape of (nvars, nstreamwise_st, nspanwise_st, notherdir_stations)
 
-                # # in case a proper interpolation is needed
-                # dn_etype = in_etypes_p[ptrn].index(dn[-2])
-                # in_sol = in_eles_p[ptrn][dn_etype]._scal_upts
+    # Put it together with mesh
+    soln = np.concatenate((recv_loc, out_soln), axis=0)
 
-                #from idx get rc_ui, and rc_ei. then copy the solution.
-                rc_ui, rc_ei = np.unravel_index(idx, out_soln.swapaxes(0,1).shape[1:])
+    # spanwise average
+    # sol has now the shape of (nvars, nstreamwise_st, nspanwise_st, notherdir_stations)
+    soln = np.mean(soln, axis=2)
+    # sol has now the shape of (nvars, nstreamwise_st, notherdir_stations)
+    soln = soln.reshape((ndims+nvars, -1))
 
-                out_soln[rc_ui,:,rc_ei] = in_sol[dn_ui, :, dn_ei]
+    # Convert to named array.
+    tps = np.float
+    names = ['x', 'y', 'z'] + varnames
+    soln_dtyptes = [(name, tps) for name in names]
+    soln_named = np.empty(soln.shape[-1], dtype=soln_dtyptes)
+    for idx, name in enumerate(names):
+        soln_named[name] = soln[idx]
 
-            # save the partition in the solution dictionary.
-            # solnmap['{}_{}_p{}'.format(prefix, etype, idxp_out)] = out_soln
-            msh5.create_dataset('{}_{}_p{}'.format(prefix, etype, idxp_out),
-                                data=out_soln)
+    #order in streamwise increasing and write to file.
+    soln_named = np.sort(soln_named, order=[args.streamwise_direction, otherdir_direction])
 
-    msh5.close()
-    # # write the new solution to file.
+    np.savetxt(args.outsolution, soln_named, delimiter=',', header=','.join(names))
+
+
     # with h5py.File(args.outsolution, 'w-') as msh5:
     #     for k, v in solnmap.items():
     #         msh5.create_dataset(k, data=v)
