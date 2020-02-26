@@ -351,12 +351,8 @@ def process_spanwise_avg(args):
     #order in streamwise increasing and write to file.
     soln_named = np.sort(soln_named, order=[args.streamwise_direction, otherdir_direction])
 
-    np.savetxt(args.outsolution, soln_named, delimiter=',', header=','.join(names))
-
-
-    # with h5py.File(args.outsolution, 'w-') as msh5:
-    #     for k, v in solnmap.items():
-    #         msh5.create_dataset(k, data=v)
+    np.savetxt(args.outsolution, soln_named, delimiter=',',
+               header=','.join(names), fmt='% .9e')
 
 def process_import(args):
     # Get a suitable mesh reader instance
