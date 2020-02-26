@@ -10,6 +10,7 @@ from pyfr.plugins.sampler import SamplerPlugin
 from pyfr.plugins.tavg import TavgPlugin
 from pyfr.plugins.writer import WriterPlugin
 from pyfr.util import subclass_where
+from pyfr.plugins.unittest import UnitTestPlugin
 
 
 def get_plugin(name, *args, **kwargs):

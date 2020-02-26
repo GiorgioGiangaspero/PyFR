@@ -138,6 +138,8 @@ class NodalMeshAssembler(object):
         pfaces = defaultdict(list)
         nodepts = self._nodepts
 
+        print('bpart = {}'.format(bpart))
+
         for k, (lpent, rpent) in self._pfacespents.items():
             for pftype in bpart[lpent]:
                 lfnodes = bpart[lpent][pftype]
@@ -153,6 +155,7 @@ class NodalMeshAssembler(object):
                     # Add periodic face flags
                     # Left = +, right = -, periodic BC number offset plus 1 to avoid +/- 0
                     flg = int(k) + 1
+                    print('left flag = {}'.format(flg))
 
                     lf = resid.pop(tuple(sorted(lfn)))[:-1] + ( flg,)
                     rf = resid.pop(tuple(sorted(rfn)))[:-1] + (-flg,)
