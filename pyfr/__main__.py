@@ -85,21 +85,24 @@ def main():
     ap_spanwise_avg.add_argument('inmesh', type=str, help='input mesh file')
     ap_spanwise_avg.add_argument('insolution', type=str,
                                  help='input solution file')
-    ap_spanwise_avg.add_argument('spanwise_direction', choices=['x', 'y', 'z'],
-                                 default='z', help='spanwise direction')
-    ap_spanwise_avg.add_argument('streamwise_direction', choices=['x', 'y', 'z'],
+    ap_spanwise_avg.add_argument('--streamwise_direction', choices=['x', 'y', 'z'],
                                  default='x', help='streamwise_direction direction')
+    ap_spanwise_avg.add_argument('--spanwise_direction', choices=['x', 'y', 'z'],
+                                 default='z', help='spanwise direction')
+    ap_spanwise_avg.add_argument('streamwise_loc_generating_plane', type=float,
+                                 help='streamwise location of the plane that '
+                                 'generates the synthetic turbulence')
     ap_spanwise_avg.add_argument('n_streamwise_stations', type=int,
-                                 default=100, help='number of sample points along '
+                                 help='number of sample points along '
                                  'along the streamwise direction')
     ap_spanwise_avg.add_argument('n_spanwise_stations', type=int,
-                                 default=100, help='number of sample points along '
+                                 help='number of sample points along '
                                  'along the spanwise direction')
     ap_spanwise_avg.add_argument('n_otherdir_stations', type=int,
-                                 default=100, help='number of sample points along '
+                                 help='number of sample points along '
                                  'along the other direction (normal to streamwise '
                                  ' and spanwise')
-    ap_spanwise_avg.add_argument('outsolution', type=str,
+    ap_spanwise_avg.add_argument('--outsolution', type=str,
                                  default='spanwise_avg.csv', help='output .csv file')
     ap_spanwise_avg.set_defaults(process=process_spanwise_avg)
 
@@ -238,13 +241,13 @@ def process_spanwise_avg(args):
     # spanwise averaging.
     coord_to_idx = {'x':0, 'y':1, 'z':2}
     otherdir_direction = [d for d in coord_to_idx.keys() if d is not args.streamwise_direction and d is not args.spanwise_direction][0]
-    mmin = bounds[coord_to_idx[args.streamwise_direction], 0]
+    mmin = bounds[coord_to_idx[args.streamwise_direction], 0] + args.streamwise_loc_generating_plane
     mmax = bounds[coord_to_idx[args.streamwise_direction], 1]
-    str_stations = np.linspace(mmin, mmax, num=args.n_streamwise_stations, endpoint=True)
+    str_stations = np.linspace(mmin, mmax, num=args.n_streamwise_stations, endpoint=False)
 
     mmin = bounds[coord_to_idx[args.spanwise_direction], 0]
     mmax = bounds[coord_to_idx[args.spanwise_direction], 1]
-    spn_stations = np.linspace(mmin, mmax, num=args.n_spanwise_stations, endpoint=False)
+    spn_stations = np.linspace(mmin, mmax, num=args.n_spanwise_stations, endpoint=True)
 
     mmin = bounds[coord_to_idx[otherdir_direction], 0]
     mmax = bounds[coord_to_idx[otherdir_direction], 1]
