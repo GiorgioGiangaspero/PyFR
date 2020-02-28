@@ -102,8 +102,6 @@ def main():
                                  help='number of sample points along '
                                  'along the other direction (normal to streamwise '
                                  ' and spanwise')
-    ap_spanwise_avg.add_argument('--outsolution', type=str,
-                                 default='spanwise_avg.csv', help='output .csv file')
     ap_spanwise_avg.set_defaults(process=process_spanwise_avg)
 
     # Run command
@@ -354,7 +352,11 @@ def process_spanwise_avg(args):
     #order in streamwise increasing and write to file.
     soln_named = np.sort(soln_named, order=[args.streamwise_direction, otherdir_direction])
 
-    np.savetxt(args.outsolution, soln_named, delimiter=',',
+    avg_info = '{}str_{}spn_{}oth.csv'.format(args.n_streamwise_stations,
+                                              args.n_spanwise_stations,
+                                              args.n_otherdir_stations)
+    outfilename = args.insolution.replace('.pyfrs', '_spanwise_avg_' + avg_info)
+    np.savetxt(outfilename, soln_named, delimiter=',',
                header=','.join(names), fmt='% .9e')
 
 def process_import(args):
